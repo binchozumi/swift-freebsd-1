@@ -553,11 +553,11 @@ public:
     assert(IGM.DebugInfo && "debug info not enabled");
     if (ArgNo) {
       PrologueLocation AutoRestore(IGM.DebugInfo, Builder);
-      IGM.DebugInfo->emitArgVariableDeclaration(Builder, Storage, Ty, DS, Name,
-                                                ArgNo, Indirection);
+      IGM.DebugInfo->emitVariableDeclaration(Builder, Storage, Ty, DS, Name,
+                                             ArgNo, Indirection);
     } else
-      IGM.DebugInfo->emitStackVariableDeclaration(Builder, Storage, Ty, DS,
-                                                  Name, Indirection);
+      IGM.DebugInfo->emitVariableDeclaration(Builder, Storage, Ty, DS, Name, 0,
+                                             Indirection);
   }
 
   void emitFailBB() {
@@ -575,8 +575,6 @@ public:
   //===--------------------------------------------------------------------===//
 
   void visitSILBasicBlock(SILBasicBlock *BB);
-  IndirectionKind getLoweredArgValue(llvm::SmallVectorImpl<llvm::Value *> &Vals,
-                                     SILArgument *Arg, StringRef Name);
 
   void emitFunctionArgDebugInfo(SILBasicBlock *BB);
 
@@ -1390,24 +1388,6 @@ static unsigned countArgs(DeclContext *DC) {
   return N;
 }
 
-/// Store the lowered IR representation of Arg in the array
-/// Vals. Returns true if Arg is a byref argument.
-IndirectionKind IRGenSILFunction::
-getLoweredArgValue(llvm::SmallVectorImpl<llvm::Value *> &Vals,
-                   SILArgument *Arg, StringRef Name) {
-  const LoweredValue &LoweredArg = getLoweredValue(Arg);
-  if (LoweredArg.isAddress()) {
-    Vals.push_back(LoweredArg.getAddress().getAddress());
-    return IndirectValue;
-  } else if (LoweredArg.kind == LoweredValue::Kind::Explosion) {
-    Explosion e = LoweredArg.getExplosion(*this);
-    for (auto val : e.claimAll())
-      Vals.push_back(val);
-  } else
-    llvm_unreachable("unhandled argument kind");
-  return DirectValue;
-}
-
 void IRGenSILFunction::emitFunctionArgDebugInfo(SILBasicBlock *BB) {
   // Emit the artificial error result argument.
   auto FnTy = CurSILFn->getLoweredFunctionType();
@@ -1424,10 +1404,9 @@ void IRGenSILFunction::emitFunctionArgDebugInfo(SILBasicBlock *BB) {
     // other argument. It is only used for sorting.
     unsigned ArgNo =
         countArgs(CurSILFn->getDeclContext()) + 1 + BB->getBBArgs().size();
-    IGM.DebugInfo->emitArgVariableDeclaration(
+    IGM.DebugInfo->emitVariableDeclaration(
         Builder, emitShadowCopy(ErrorResultSlot.getAddress(), Name), DTI,
-        getDebugScope(), Name, ArgNo,
-        IndirectValue, ArtificialValue);
+        getDebugScope(), Name, ArgNo, IndirectValue, ArtificialValue);
   }
 }
 
@@ -3431,11 +3410,10 @@ void IRGenSILFunction::visitAllocBoxInst(swift::AllocBoxInst *i) {
         Decl->getType()->getKind() == TypeKind::InOut)
       Indirection = DirectValue;
 
-    IGM.DebugInfo->emitStackVariableDeclaration
-      (Builder,
-       emitShadowCopy(addr.getAddress(), Name),
-       DebugTypeInfo(Decl, i->getElementType().getSwiftType(), type),
-       i->getDebugScope(), Name, Indirection);
+    IGM.DebugInfo->emitVariableDeclaration(
+        Builder, emitShadowCopy(addr.getAddress(), Name),
+        DebugTypeInfo(Decl, i->getElementType().getSwiftType(), type),
+        i->getDebugScope(), Name, 0, Indirection);
   }
 }
 
